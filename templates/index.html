@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Excel 导入 MariaDB</title>
+</head>
+<body>
+    <h1>Excel 导入 MariaDB</h1>
+    <form method="post" action="/upload"> <label for="excel_file">Excel文件路径:</label>
+        <input type="text" id="excel_file" name="excel_file" value="{{ config.get('excel_file', '') }}" required><br>
+        <label for="host">数据库地址:</label>
+        <input type="text" id="host" name="host" value="{{ config.get('host', '192.168.1.1') }}" required><br>
+        <label for="username">用户名:</label>
+        <input type="text" id="username" name="username" value="{{ config.get('username', 'root') }}" required><br>
+        <label for="password">密码:</label>
+        <input type="password" id="password" name="password" value="{{ config.get('password', 'test') }}" required><br>
+        <label for="database">数据库:</label>
+        <input type="text" id="database" name="database" value="{{ config.get('database', 'test') }}" required><br>
+        <label for="port">端口:</label>
+        <input type="text" id="port" name="port" value="{{ config.get('port', '3306') }}" required><br>
+        <input type="submit" value="开始导入">
+    </form>
+</body>
+</html>

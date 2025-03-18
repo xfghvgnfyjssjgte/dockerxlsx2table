@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>导入进度</title>
+</head>
+<body>
+    <h1>导入进度</h1>
+    <div id="progress-bar" style="width: 300px; border: 1px solid #ccc;">
+        <div id="progress" style="width: 0%; height: 20px; background-color: #4CAF50;"></div>
+    </div>
+    <p id="message"></p>
+    <div id="import-status"></div>
+
+    <script>
+        function updateProgress() {
+            fetch('/progress_data')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('progress').style.width = data.percentage + '%';
+                    document.getElementById('message').textContent = data.message;
+                    if (data.percentage === 100) {
+                        document.getElementById('import-status').textContent = data.status;
+                    } else {
+                        document.getElementById('import-status').textContent = "正在导入...";
+                        setTimeout(updateProgress, 1000); // 每秒更新一次
+                    }
+                });
+        }
+        updateProgress();
+    </script>
+</body>
+</html>
