@@ -94,7 +94,7 @@
 2.  **运行 Docker 容器：**
  ```bash
 docker run -d \
-    --name excel-to-mariadb-importer \
+    --name x2t \
     -p 5000:5000 \
     -v /mnt/nvme0n1-4/home/x2t/upfile:/app/upfile \
     excel-to-mariadb
