@@ -96,7 +96,7 @@
 docker run -d \
     --name excel-to-mariadb-importer \
     -p 5000:5000 \
-    -v $(pwd)/upfile:/app/upfile \
+    -v /mnt/nvme0n1-4/home/x2t/upfile:/app/upfile \
     excel-to-mariadb
        * 应用程序将在 `http://localhost:5000` 上可用。
 
