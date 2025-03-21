@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>导入进度</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #f3f3f3;
+            margin: 20px 0;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 30px;
+            background-color: #4CAF50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+        .status {
+            margin: 20px 0;
+        }
+        .button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Excel 导入进度</h1>
+    <div class="progress-container">
+        <div class="progress-bar" id="progressBar">0%</div>
+    </div>
+    <div class="status">
+        <p id="message">正在准备导入...</p>
+        <p id="status"></p>
+    </div>
+    <a href="/" class="button" id="backButton">返回首页</a>
+
+    <script>
+        // 设置轮询时间间隔（毫秒）
+        const POLL_INTERVAL = 500;
+        
+        // 记录当前进度
+        let currentProgress = 0;
+        let pollCount = 0;
+        
+        function updateProgress() {
+            fetch('/progress_data')
+                .then(response => response.json())
+                .then(data => {
+                    // 更新进度条
+                    document.getElementById('progressBar').style.width = data.percentage + '%';
+                    document.getElementById('progressBar').innerText = data.percentage + '%';
+                    
+                    // 更新消息
+                    if (data.message) {
+                        document.getElementById('message').innerText = data.message;
+                    }
+                    
+                    // 更新状态
+                    if (data.status) {
+                        document.getElementById('status').innerText = data.status;
+                    }
+                    
+                    // 记录当前进度
+                    currentProgress = data.percentage;
+                    
+                    // 继续轮询，除非进度是100%
+                    if (currentProgress < 100) {
+                        setTimeout(updateProgress, POLL_INTERVAL);
+                    }
+                    
+                    // 如果进度长时间不变，可能导入已完成但进度未更新
+                    pollCount++;
+                    if (pollCount > 20 && currentProgress === 0) {
+                        // 超过10秒没有进度更新，显示返回按钮
+                        document.getElementById('status').innerText = "导入可能已完成，但进度未更新。请返回首页查看结果。";
+                    }
+                })
+                .catch(error => {
+                    console.error('获取进度数据失败:', error);
+                    document.getElementById('status').innerText = "获取进度数据失败，请刷新页面或返回首页。";
+                });
+        }
+        
+        // 页面加载时开始更新进度
+        document.addEventListener('DOMContentLoaded', function() {
+            updateProgress();
+        });
+    </script>
+</body>
+</html>
