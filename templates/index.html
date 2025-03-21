@@ -3,22 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <title>Excel 导入 MariaDB</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: inline-block;
+            width: 120px;
+        }
+        input, select {
+            padding: 5px;
+            width: 300px;
+        }
+        .button-group {
+            margin-top: 20px;
+        }
+        .button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .button.reset {
+            background-color: #f44336;
+        }
+    </style>
 </head>
 <body>
     <h1>Excel 导入 MariaDB</h1>
-    <form method="post" action="/upload"> <label for="excel_file">Excel文件路径:</label>
-        <input type="text" id="excel_file" name="excel_file" value="{{ config.get('excel_file', '') }}" required><br>
-        <label for="host">数据库地址:</label>
-        <input type="text" id="host" name="host" value="{{ config.get('host', '192.168.1.1') }}" required><br>
-        <label for="username">用户名:</label>
-        <input type="text" id="username" name="username" value="{{ config.get('username', 'root') }}" required><br>
-        <label for="password">密码:</label>
-        <input type="password" id="password" name="password" value="{{ config.get('password', 'test') }}" required><br>
-        <label for="database">数据库:</label>
-        <input type="text" id="database" name="database" value="{{ config.get('database', 'test') }}" required><br>
-        <label for="port">端口:</label>
-        <input type="text" id="port" name="port" value="{{ config.get('port', '3306') }}" required><br>
-        <input type="submit" value="开始导入">
+    <form method="post" action="/">
+        <div class="form-group">
+            <label for="excel_file">选择 Excel 文件:</label>
+            <select id="excel_file" name="excel_file">
+                {% for file in file_list %}
+                <option value="{{ file }}">{{ file }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="host">数据库地址:</label>
+            <input type="text" id="host" name="host" value="{{ config.get('host', '192.168.1.1') }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="username">用户名:</label>
+            <input type="text" id="username" name="username" value="{{ config.get('username', 'root') }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="password">密码:</label>
+            <input type="password" id="password" name="password" value="{{ config.get('password', 'test') }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="database">数据库:</label>
+            <input type="text" id="database" name="database" value="{{ config.get('database', 'test') }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="port">端口:</label>
+            <input type="text" id="port" name="port" value="{{ config.get('port', '3306') }}" required>
+        </div>
+
+        <div class="button-group">
+            <input type="submit" value="开始导入" class="button">
+            <a href="/refresh" class="button reset">刷新文件列表</a>
+        </div>
     </form>
 </body>
 </html>
