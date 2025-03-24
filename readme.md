@@ -92,13 +92,13 @@
     docker build -t excel-to-mariadb .
     ```
 2.  **运行 Docker 容器：**
-  ```bash
+```bash
 docker run -d \
-    --name xx2t \
+    --name x2t \
     -p 5000:5000 \
     -v $(pwd)/upfile:/app/upfile \
     excel-to-mariadb
-        ```
+```
        * 应用程序将在 `http://localhost:5000` 上可用。
 
 ## 配置
