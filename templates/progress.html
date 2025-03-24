@@ -28,13 +28,23 @@
         }
         .button {
             padding: 8px 15px;
-            background-color: #4CAF50;
             color: white;
             border: none;
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
             margin-top: 20px;
+            margin-right: 10px;
+        }
+        .button-green {
+            background-color: #4CAF50;
+        }
+        .button-red {
+            background-color: #f44336;
+        }
+        .button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
         }
     </style>
 </head>
@@ -47,7 +57,10 @@
         <p id="message">正在准备导入...</p>
         <p id="status"></p>
     </div>
-    <a href="/" class="button" id="backButton">返回首页</a>
+    <div>
+        <button id="stopButton" class="button button-red" onclick="stopImport()">停止导入</button>
+        <a href="/" class="button button-green" id="backButton">返回首页</a>
+    </div>
 
     <script>
         // 设置轮询时间间隔（毫秒）
@@ -57,6 +70,21 @@
         let currentProgress = 0;
         let pollCount = 0;
         
+        function stopImport() {
+            fetch('/stop_import', {
+                method: 'POST',
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('message').innerText = data.message;
+                document.getElementById('stopButton').disabled = true;
+            })
+            .catch(error => {
+                console.error('停止导入失败:', error);
+                document.getElementById('status').innerText = "停止导入失败，请刷新页面重试。";
+            });
+        }
+
         function updateProgress() {
             fetch('/progress_data')
                 .then(response => response.json())
@@ -75,19 +103,26 @@
                         document.getElementById('status').innerText = data.status;
                     }
                     
+                    // 控制停止按钮状态
+                    const stopButton = document.getElementById('stopButton');
+                    if (!data.can_stop || data.percentage === 100 || 
+                        data.status === '导入失败' || data.status === '已停止') {
+                        stopButton.disabled = true;
+                    }
+                    
                     // 记录当前进度
                     currentProgress = data.percentage;
                     
-                    // 继续轮询，除非进度是100%
-                    if (currentProgress < 100) {
+                    // 继续轮询，除非进度是100%或已停止
+                    if (currentProgress < 100 && data.status !== '已停止') {
                         setTimeout(updateProgress, POLL_INTERVAL);
                     }
                     
                     // 如果进度长时间不变，可能导入已完成但进度未更新
                     pollCount++;
                     if (pollCount > 20 && currentProgress === 0) {
-                        // 超过10秒没有进度更新，显示返回按钮
                         document.getElementById('status').innerText = "导入可能已完成，但进度未更新。请返回首页查看结果。";
+                        stopButton.disabled = true;
                     }
                 })
                 .catch(error => {
