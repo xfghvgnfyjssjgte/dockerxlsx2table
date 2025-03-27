@@ -9,75 +9,21 @@ import json
 import os
 import threading
 from werkzeug.utils import secure_filename
+from modules.column_type_detector import determine_column_type  # 导入字符判断模块
 
-def determine_column_type(column_values):
-    """根据列数据推断数据类型，并处理过长的 VARCHAR 列"""
-    original_values = column_values.astype(str).str.strip()  # 保留原始值用于空值检测
-    filtered_values = original_values[original_values != ""]
-    
-    if filtered_values.empty:
-        return 'VARCHAR(100)'
-    
-    # 新增：检查原始数据中是否存在空字符串
-    has_empty = (original_values == '').any()
-    
-    # 日期时间检测（保持不变）
-    for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S'):
-        try:
-            pd.to_datetime(column_values, format=fmt, errors='raise')
-            return 'DATETIME' if ' ' in fmt else 'DATE'
-        except Exception:
-            continue
-    
-    # 检查是否全是数字格式
-    numeric_values = filtered_values.str.replace(',', '', regex=True)
-    if numeric_values.str.match(r'^-?\d+$').all():
-        # 检查数字长度，如果任何值超过10位，使用VARCHAR
-        max_digits = numeric_values.str.len().max()
-        if max_digits > 10:  # INT最大为10位数字
-            return f'VARCHAR({max(max_digits + 5, 30)})'  # 确保足够长度
-        # 如果存在空字符串，使用VARCHAR
-        if (column_values == '').any():
-            return f'VARCHAR({max(max_digits + 5, 30)})'
-        return 'INT'
-    
-    if numeric_values.str.match(r'^-?\d+(\.\d+)?$').all():
-        # 同样检查DECIMAL类型可能超范围的情况
-        integer_parts = [len(str(val).split('.')[0]) for val in numeric_values if '.' in str(val)]
-        if integer_parts and max(integer_parts, default=0) > 12:  # DECIMAL(18,6)最多12位整数部分
-            return f'VARCHAR({max(numeric_values.str.len().max() + 5, 30)})'
-        # 如果存在空字符串，使用VARCHAR
-        if (column_values == '').any():
-            return f'VARCHAR({max(numeric_values.str.len().max() + 5, 30)})'
-        return 'DECIMAL(18,6)'
-    
-    # 如果类型混合或无法判断，fallback 到 VARCHAR
-    max_length = column_values.str.len().max()
-    if max_length <= 50:
-        return f'VARCHAR({max_length + 10})'  # 给一点余量
-    elif max_length <= 100:
-        return 'VARCHAR(100)'
-    elif max_length <= 200:
-        return 'VARCHAR(200)'
-    elif max_length > 255:
-        if max_length > 65535:
-            return 'LONGTEXT'
-        elif max_length > 16383:
-            return 'MEDIUMTEXT'
-        else:
-            return 'TEXT'
-    else:
-        return 'VARCHAR(255)'
+EXCEL_DIR = './upfile'
+progress_lock = threading.Lock()
+app = Flask(__name__)
 
-progress = {'percentage': 0, 'message': '', 'status': ''}  # 用于存储进度信息
+# 统一全局变量定义
+progress = {'percentage': 0, 'message': '', 'status': '', 'can_stop': True}
+import_flag = False  # 重命名为 import_flag 避免与函数名冲突
 
 def excel2mariadb_with_progress(excel_path, username, password, host, database, port):
-    global progress
-    # 重置进度信息
-    progress = {'percentage': 0, 'message': '准备导入...', 'status': ''}
-    
-    start_time = time.time()
+    global progress, import_flag
+    cursor = None
     conn = None
+    start_time = time.time()  # 修复：添加 start_time 定义
     try:
         if excel_path.endswith('.xls'):
             engine_type = 'xlrd'
@@ -87,9 +33,47 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
             raise ValueError("不支持的文件类型，请提供 .xls 或 .xlsx 文件。")
         
         progress['percentage'] = 5
-        progress['message'] = "正在读取Excel文件..."
+        loading_message = "正在读取Excel文件,如果文件较大此过程将会很慢，请耐心等待"
         
-        df = pd.read_excel(excel_path, dtype=str, keep_default_na=False, engine=engine_type)
+        # 创建一个事件来控制加载消息线程
+        file_loaded_event = threading.Event()
+        
+        # 创建一个线程来更新加载消息
+        def update_loading_message():
+            indicators = ["|", "/", "-", "\\"]
+            i = 0
+            while not file_loaded_event.is_set():
+                with progress_lock:
+                    progress['message'] = f"{loading_message} [{indicators[i]}]"
+                i = (i + 1) % len(indicators)
+                time.sleep(0.2)
+        
+        loading_thread = threading.Thread(target=update_loading_message, daemon=True)
+        loading_thread.start()
+        
+        # 读取Excel文件
+        if excel_path.endswith('.xlsx'):
+            df = pd.read_excel(
+                excel_path,
+                dtype=str,
+                keep_default_na=False,
+                engine='openpyxl',
+                engine_kwargs={
+                    'read_only': True,
+                    'data_only': True
+                }
+            )
+        else:  # .xls 文件
+            df = pd.read_excel(
+                excel_path,
+                dtype=str,
+                keep_default_na=False,
+                engine='xlrd'
+            )
+            
+        # 标记文件已加载完成
+        file_loaded_event.set()
+        
         original_columns = [str(col).strip() for col in df.columns]
         table_name = Path(excel_path).stem
         table_name = re.sub(r'[^a-zA-Z0-9_\u4e00-\u9fff]', '_', table_name)[:30]
@@ -122,7 +106,7 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
         # 计算预估的行大小
         estimated_row_size = 0
         for col in original_columns:
-            column_type = determine_column_type(df[col])
+            column_type = determine_column_type(df[col])  # 使用导入的函数
             columns_definition.append(f'`{col}` {column_type}')
             
             # 粗略估计每列占用的字节数
@@ -176,39 +160,68 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
         cursor.execute("SET unique_checks=0")
         cursor.execute("SET foreign_key_checks=0")
         
+        # 修改：增加批量提交大小，减少网络通信
+        batch_size = 10000  # 增加批量大小
+        commit_size = 50000  # 每20000条记录提交一次
+        
         progress['percentage'] = 30
         progress['message'] = "开始数据导入..."
         
         total_rows = len(df)
-        batch_size = 2000
         total_batches = (total_rows + batch_size - 1) // batch_size
         column_names = [f"`{col}`" for col in original_columns]
         placeholder = ", ".join(["%s"] * len(original_columns))
         insert_sql = f'INSERT INTO `{table_name}` ({", ".join(column_names)}) VALUES ({placeholder})'
 
+        records_since_commit = 0
         for batch_num in range(total_batches):
+            if import_flag:
+                progress['message'] = "导入已被用户停止"
+                progress['status'] = "已停止"
+                progress['can_stop'] = False
+                if records_since_commit > 0:
+                    conn.commit()
+                if cursor:
+                    cursor.execute("SET unique_checks=1")
+                    cursor.execute("SET foreign_key_checks=1")
+                    cursor.execute("SET autocommit=1")
+                return "导入已停止"
+
             start = batch_num * batch_size
             end = min(start + batch_size, total_rows)
             batch = df.iloc[start:end].values
-            # 处理数值类型列（INT 和 DECIMAL）的空字符串，替换为 None
-            # 在数据导入循环中增加更严格的空值处理
-            for i, row in enumerate(batch):
+            
+            # 数据处理优化：预先处理整个批次的数据
+            processed_batch = []
+            for row in batch:
+                processed_row = []
                 for j, col in enumerate(original_columns):
                     cell_value = str(row[j]).strip()
-                    # 统一处理所有数值类型的空值
                     if cell_value == '':
-                        batch[i][j] = None
+                        processed_row.append(None)
                     else:
-                        # 额外处理数值类型中的千分位逗号
-                        column_type = determine_column_type(df[col])
+                        column_type = columns_definition[j]
                         if 'INT' in column_type or 'DECIMAL' in column_type:
-                            batch[i][j] = cell_value.replace(',', '')
-            batch = [tuple(row) for row in batch]
-            cursor.executemany(insert_sql, batch)
-            conn.commit()
+                            processed_row.append(cell_value.replace(',', ''))
+                        else:
+                            processed_row.append(cell_value)
+                processed_batch.append(tuple(processed_row))
+
+            cursor.executemany(insert_sql, processed_batch)
+            records_since_commit += (end - start)
+
+            # 只在达到commit_size时提交，减少网络通信
+            if records_since_commit >= commit_size:
+                conn.commit()
+                records_since_commit = 0
+
             progress['percentage'] = int(30 + (batch_num + 1) / total_batches * 70)
             progress['message'] = f"已导入 {end} / {total_rows} 行"
-            time.sleep(0.1)
+            # 移除 time.sleep
+
+        # 确保最后的数据被提交
+        if records_since_commit > 0:
+            conn.commit()
 
         cursor.execute("SET unique_checks=1")
         cursor.execute("SET foreign_key_checks=1")
@@ -220,21 +233,36 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
         progress['status'] = f"一共导入 {total_rows} 条数据，用时 {elapsed_time:.2f} 秒。"
         return progress['message']
     except mysql.connector.Error as err:
-        if conn and conn.is_connected():
-            cursor = conn.cursor()
-            cursor.close()
         progress['percentage'] = 0
         progress['message'] = f"数据库连接失败: {err}"
         progress['status'] = "导入失败"
+        progress['can_stop'] = False
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
         return progress['message']
     except Exception as e:
         progress['percentage'] = 0
         progress['message'] = f"发生错误：{str(e)}"
         progress['status'] = "导入失败"
+        progress['can_stop'] = False
+        if cursor:
+            try:
+                cursor.execute("SET unique_checks=1")
+                cursor.execute("SET foreign_key_checks=1")
+                cursor.execute("SET autocommit=1")
+            except:
+                pass
         return progress['message']
     finally:
+        progress['can_stop'] = False
+        if cursor:
+            cursor.close()
         if conn and conn.is_connected():
             conn.close()
+
+# 在文件顶部添加线程锁
 
 def load_config():
     try:
@@ -253,43 +281,65 @@ def save_config(config):
     except Exception as e:
         return f"保存配置文件失败: {str(e)}"
 
-EXCEL_DIR = './upfile'
-app = Flask(__name__)
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        excel_file_name = request.form.get('excel_file')
-        host = request.form.get('host')
-        username = request.form.get('username')
-        password = request.form.get('password')
-        database = request.form.get('database')
-        port = request.form.get('port')
+        try:
+            # 文件名安全处理
+            excel_file_name = secure_filename(request.form.get('excel_file', ''))
+            if not excel_file_name:
+                return "请选择 Excel 文件"
 
-        if not excel_file_name:
-            return "请选择 Excel 文件"
+            excel_path = os.path.abspath(os.path.join(EXCEL_DIR, excel_file_name))
+            if not os.path.realpath(excel_path).startswith(os.path.realpath(EXCEL_DIR)):
+                return "非法文件路径"
+            if not os.path.exists(excel_path) or not os.path.isfile(excel_path):
+                return f"文件 {excel_file_name} 不存在或不是有效文件"
 
-        excel_path = os.path.join(EXCEL_DIR, excel_file_name)
+            # 端口号验证
+            try:
+                port = int(request.form.get('port', ''))
+                if not (0 < port < 65536):
+                    return "端口号必须在1-65535之间"
+            except ValueError:
+                return "端口号必须是有效的数字"
 
-        if not os.path.exists(excel_path):
-            return f"文件 {excel_file_name} 不存在,请确认目录{EXCEL_DIR}存在并且文件存在"
-        config = {
-            "host": host,
-            "username": username,
-            "password": password,
-            "database": database,
-            "port": port
-        }
-        save_config(config)
+            # 验证数据库参数
+            required_fields = ['host', 'username', 'password', 'database', 'port']
+            missing_fields = [field for field in required_fields if not request.form.get(field)]
+            if missing_fields:
+                return f"请填写以下必填字段: {', '.join(missing_fields)}"
 
-        # 启动后台线程
-        threading.Thread(target=excel2mariadb_with_progress, args=(excel_path, username, password, host, database, port)).start()
+            config = {field: request.form.get(field) for field in required_fields}
+            save_config(config)
 
-        return redirect(url_for('progress_page'))
+            # 重置导入状态
+            # 使用线程锁保护全局变量
+            with progress_lock:
+                global import_flag, progress
+                import_flag = False
+                progress = {'percentage': 0, 'message': '', 'status': '', 'can_stop': True}
 
-    config = load_config()
-    file_list = os.listdir(EXCEL_DIR)
-    return render_template('index.html', config=config, file_list=file_list)
+            thread = threading.Thread(
+                target=excel2mariadb_with_progress,
+                args=(excel_path, config['username'], config['password'],
+                      config['host'], config['database'], str(port)),
+                daemon=True  # 设置为守护线程
+            )
+            thread.start()
+
+            return redirect(url_for('progress_page'))
+        except Exception as e:
+            app.logger.error(f"导入过程发生错误: {str(e)}", exc_info=True)
+            return f"发生错误: {str(e)}"
+
+    try:
+        config = load_config()
+        file_list = os.listdir(EXCEL_DIR)
+        return render_template('index.html', config=config, file_list=file_list)
+    except Exception as e:
+        app.logger.error(f"加载页面时发生错误: {str(e)}", exc_info=True)
+        return "加载页面时发生错误，请检查服务器日志"
 
 @app.route('/progress')
 def progress_page():
@@ -305,6 +355,9 @@ def refresh_file_list():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    if not os.path.exists(EXCEL_DIR):
-        os.makedirs(EXCEL_DIR)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    try:
+        if not os.path.exists(EXCEL_DIR):
+            os.makedirs(EXCEL_DIR)
+        app.run(debug=False, host='0.0.0.0', port=5000)
+    except Exception as e:
+        print(f"启动服务器失败: {str(e)}")
