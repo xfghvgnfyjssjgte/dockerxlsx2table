@@ -1,117 +1,142 @@
-# Excel 到 MariaDB 导入工具
+# Excel to MariaDB Import Tool
 
-本项目提供一个基于 Web 的工具，用于将 Excel 文件（.xls 或 .xlsx）中的数据导入到 MariaDB 数据库中。它可以自动检测列数据类型，并在数据库中创建相应的表。
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![Flask](https://img.shields.io/badge/flask-2.0%2B-lightgrey)
+![Docker](https://img.shields.io/badge/docker-supported-success)
 
-## 功能
+A web-based tool for importing Excel data (.xls/.xlsx) into MariaDB with automatic schema detection.
 
-* 将 Excel 文件（.xls 或 .xlsx）中的数据导入到 MariaDB。
-* 自动检测列数据类型（VARCHAR、DECIMAL、DATE、DATETIME）。
-* 提供 Web 界面，方便配置和导入过程。
-* 显示导入进度和完成状态，包括导入时间和行数。
-* 使用 Docker 进行轻松部署和容器化。
+## Features
 
-## 技术栈
+- 📊 Excel and csv to MariaDB data migration
+- 🔍 Automatic column type detection (VARCHAR, DECIMAL, DATE, DATETIME)
+- 🌐 Web interface for easy configuration
+- 📈 Real-time progress tracking
+- 🐳 Docker container support
 
-* Flask (Python Web 框架)
-* Pandas (数据操作和分析)
-* MySQL Connector (MariaDB 数据库连接)
-* OpenPyXL 和 xlrd (Excel 文件处理)
-* Docker (容器化)
+## Tech Stack
 
-## 安装说明
+* Flask (Python web framework)
+* Pandas (data manipulation and analysis)
+* MySQL Connector (MariaDB database connection)
+* OpenPyXL and xlrd (Excel file processing)
+* Docker (containerization)
 
-1.  **克隆仓库：**
+## Project Structure
 
-    ```bash
-    git clone <仓库地址>
-    cd <仓库目录>
-    ```
-
-2.  **安装 Python 依赖项：**
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  **配置数据库连接：**
-
-    * 在项目根目录中创建一个 `config.json` 文件，结构如下：
-
-        ```json
-        {
-          "host": "您的数据库主机",
-          "username": "您的数据库用户名",
-          "password": "您的数据库密码",
-          "database": "您的数据库名称",
-          "port": "您的数据库端口"
-        }
-        ```
-
-    * 将占位符替换为您的实际数据库凭据。
-
-4.  **运行应用程序：**
-
-    ```bash
-    python xlsx2table.py
-    ```
-
-    * 应用程序将在 `http://0.0.0.0:5000` 上可用。
-
-## 使用说明
-
-1.  **打开 Web 界面：**
-
-    * 打开您的 Web 浏览器，导航到 `http://0.0.0.0:5000`。
-
-2.  **输入 Excel 文件路径和数据库凭据：**
-
-    * 在 `upfile` 目录中提供 Excel 文件的路径。
-    * 输入数据库连接详细信息。
-
-3.  **开始导入：**
-
-    * 单击“开始导入”按钮。
-
-4.  **监控导入进度：**
-
-    * 您将被重定向到进度页面，该页面显示导入进度和状态。
-
-## 项目结构├── xlsx2table.py
+```
+.
+├── Dockerfile
+├── modules/
+│   ├── database.py
+│   └── excel_processor.py
+├── README.md
+├── requirements.txt
 ├── templates/
 │   ├── index.html
 │   └── progress.html
 ├── upfile/
-├── config.json
-├── requirements.txt
-└── Dockerfile
-## Docker
+└── xlsx2table.py
+```
 
-1.  **构建 Docker 镜像：**
+## Installation
 
-    ```bash
-    docker build -t excel-to-mariadb .
-    ```
-2.  **运行 Docker 容器：**
-  ```bash
-docker run -d \
-    --name xx2t \
-    -p 5000:5000 \
-    -v $(pwd)/upfile:/app/upfile \
-    excel-to-mariadb
-        ```
-       * 应用程序将在 `http://localhost:5000` 上可用。
+### Manual Setup
 
-## 配置
+1. Clone repository:
+   ```bash
+   git clone https://github.com/xfghvgnfyjssjgte/dockerxlsx2table.git
+   cd excel-to-mariadb
+   ```
 
-* `config.json`：存储数据库连接详细信息。
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## 依赖项
+3. Configure database in `config.json`:
+   ```json
+   {
+     "host": "localhost",
+     "username": "db_user",
+     "password": "db_password",
+     "database": "target_db",
+     "port": 3306,
+     "auto_create_tables": true,
+     "default_string_length": 255,
+     "date_format": "%Y-%m-%d",
+     "batch_size": 1000
+   }
+   ```
 
-pip install flask pandas mysql-connector-python
-## 许可证
+### Docker Setup
 
-本项目使用 MIT 许可证。
+1. Build the image:
+   ```bash
+   docker build -t excel-importer .
+   ```
 
-## 贡献指南
+2. Run container:
+   ```bash
+   docker run -d \
+     -p 5000:5000 \
+     -v ./upfile:/app/upfile \
+     -v ./config.json:/app/config.json \
+     --name excel-importer \
+     excel-importer
+   ```
 
-欢迎贡献！请随时提交拉取请求或打开问题。
+## Usage
+
+1. Place Excel files in `./upfile` directory
+2. Access web interface at `http://localhost:5000`
+3. Select file and configure import settings
+4. Monitor progress on `/progress` page
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Upload interface |
+| `/upload` | POST | Process Excel file |
+| `/progress` | GET | Import status |
+
+## Development
+
+```bash
+# Run in development mode
+FLASK_ENV=development python xlsx2table.py
+
+# Run tests
+python -m unittest discover modules/tests
+```
+
+## Dependencies
+
+Listed in `requirements.txt`:
+```
+flask==2.0.3
+pandas==1.3.4
+mysql-connector-python==8.0.26
+openpyxl==3.0.9
+xlrd==2.0.1
+```
+
+## License
+
+MIT License - See [LICENSE](LICENSE) for details.
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/fooBar`)
+3. Commit your changes (`git commit -am 'Add some fooBar'`)
+4. Push to the branch (`git push origin feature/fooBar`)
+5. Create a new Pull Request
+
+---
+
+> ​**Note**: For production deployment, ensure to:
+> - Secure your database credentials
+> - Set appropriate file permissions for the `upfile` directory
+> - Configure proper logging in `xlsx2table.py`
