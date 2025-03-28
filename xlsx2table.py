@@ -8,6 +8,7 @@ import time
 import json
 import os
 import threading
+import csv
 from werkzeug.utils import secure_filename
 from modules.column_type_detector import determine_column_type  # 导入字符判断模块
 
@@ -23,36 +24,75 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
     global progress, import_flag
     cursor = None
     conn = None
-    start_time = time.time()  # 修复：添加 start_time 定义
+    start_time = time.time()
     try:
-        if excel_path.endswith('.xls'):
-            engine_type = 'xlrd'
-        elif excel_path.endswith('.xlsx'):
-            engine_type = 'openpyxl'
+        # 根据文件扩展名确定文件类型和读取方式
+        file_ext = os.path.splitext(excel_path)[1].lower()
+        
+        if file_ext == '.csv':
+            file_type = 'csv'
+        elif file_ext == '.xls':
+            file_type = 'xls'
+        elif file_ext == '.xlsx':
+            file_type = 'xlsx'
         else:
-            raise ValueError("不支持的文件类型，请提供 .xls 或 .xlsx 文件。")
+            raise ValueError("不支持的文件类型，请提供 .csv, .xls 或 .xlsx 文件。")
         
         progress['percentage'] = 5
-        loading_message = "正在读取Excel文件,如果文件较大此过程将会很慢，请耐心等待"
+        loading_message = f"正在读取{file_type.upper()}文件,如果文件较大此过程将会很慢，请耐心等待"
         
         # 创建一个事件来控制加载消息线程
         file_loaded_event = threading.Event()
         
         # 创建一个线程来更新加载消息
         def update_loading_message():
-            indicators = ["|", "/", "-", "\\"]
+            # 使用优雅的旋转动画
+            indicators = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             i = 0
             while not file_loaded_event.is_set():
                 with progress_lock:
-                    progress['message'] = f"{loading_message} [{indicators[i]}]"
+                    progress['message'] = f"{loading_message} {indicators[i]}"
                 i = (i + 1) % len(indicators)
-                time.sleep(0.2)
-        
+                time.sleep(0.08)  # 调整动画速度
+
         loading_thread = threading.Thread(target=update_loading_message, daemon=True)
         loading_thread.start()
         
-        # 读取Excel文件
-        if excel_path.endswith('.xlsx'):
+        # 根据文件类型读取数据
+        if file_type == 'csv':
+            # 尝试检测CSV文件编码，优先使用 UTF-8 with BOM 和 UTF-8
+            encodings = ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'latin1']
+            df = None
+            
+            for encoding in encodings:
+                try:
+                    # 先尝试直接读取表头来检测分隔符
+                    with open(excel_path, 'r', encoding=encoding) as f:
+                        header = f.readline()
+                        # 常见的分隔符
+                        for delimiter in [',', '\t', ';']:
+                            if delimiter in header:
+                                progress['message'] = f"检测到分隔符: {delimiter}, 使用编码: {encoding}"
+                                
+                                # 直接一次性读取文件
+                                df = pd.read_csv(
+                                    excel_path,
+                                    dtype=str,
+                                    keep_default_na=False,
+                                    encoding=encoding,
+                                    delimiter=delimiter,
+                                    low_memory=False  # 对于大文件，禁用内存优化以提高速度
+                                )
+                                break
+                    if df is not None:
+                        break
+                except Exception as e:
+                    continue
+            
+            if df is None:
+                raise ValueError("无法读取CSV文件，请检查文件格式和编码。")
+                
+        elif file_type == 'xlsx':
             df = pd.read_excel(
                 excel_path,
                 dtype=str,
@@ -97,8 +137,22 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
         )
         cursor = conn.cursor()
         
+        # 优化数据类型分析过程
         progress['percentage'] = 15
-        progress['message'] = "正在分析数据类型..."
+        analysis_message = "正在分析数据类型"
+        analysis_event = threading.Event()
+        
+        def update_analysis_message():
+            indicators = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            i = 0
+            while not analysis_event.is_set():
+                with progress_lock:
+                    progress['message'] = f"{analysis_message} {indicators[i]}"
+                i = (i + 1) % len(indicators)
+                time.sleep(0.08)
+
+        analysis_thread = threading.Thread(target=update_analysis_message, daemon=True)
+        analysis_thread.start()
         
         cursor.execute(f'DROP TABLE IF EXISTS `{table_name}`')
         columns_definition = []
@@ -149,6 +203,9 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
                         progress['message'] = f"将列 {original_columns[i]} 从VARCHAR转为TEXT，现在估计行大小: {estimated_row_size} 字节"
                 else:
                     break
+        
+        # 分析完成，停止分析动画
+        analysis_event.set()
         
         progress['percentage'] = 25
         progress['message'] = "正在创建表结构..."
@@ -237,30 +294,46 @@ def excel2mariadb_with_progress(excel_path, username, password, host, database, 
         progress['message'] = f"数据库连接失败: {err}"
         progress['status'] = "导入失败"
         progress['can_stop'] = False
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close()
         return progress['message']
     except Exception as e:
         progress['percentage'] = 0
         progress['message'] = f"发生错误：{str(e)}"
         progress['status'] = "导入失败"
         progress['can_stop'] = False
-        if cursor:
-            try:
-                cursor.execute("SET unique_checks=1")
-                cursor.execute("SET foreign_key_checks=1")
-                cursor.execute("SET autocommit=1")
-            except:
-                pass
         return progress['message']
     finally:
+        # 释放数据库资源
         progress['can_stop'] = False
         if cursor:
-            cursor.close()
+            try:
+                cursor.close()
+            except:
+                pass
         if conn and conn.is_connected():
-            conn.close()
+            try:
+                conn.close()
+            except:
+                pass
+        
+        # 释放文件加载事件
+        try:
+            file_loaded_event.set()
+        except:
+            pass
+            
+        # 释放pandas和numpy相关资源
+        try:
+            del df
+            del batch
+            del processed_batch
+            del original_columns
+            del columns_definition
+        except:
+            pass
+        
+        # 强制垃圾回收
+        import gc
+        gc.collect()
 
 # 在文件顶部添加线程锁
 

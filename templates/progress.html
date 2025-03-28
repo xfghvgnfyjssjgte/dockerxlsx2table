@@ -14,14 +14,46 @@
             width: 100%;
             background-color: #f3f3f3;
             margin: 20px 0;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.1);
         }
         .progress-bar {
             width: 0%;
             height: 30px;
-            background-color: #4CAF50;
+            background: linear-gradient(45deg, #4CAF50, #45a049);
             text-align: center;
             line-height: 30px;
             color: white;
+            transition: width 0.5s ease-in-out;
+            position: relative;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                90deg,
+                rgba(255,255,255,0.1) 25%,
+                rgba(255,255,255,0.2) 50%,
+                rgba(255,255,255,0.1) 75%
+            );
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite linear;
+        }
+        
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+            100% {
+                background-position: -200% 0;
+            }
         }
         .status {
             margin: 20px 0;
@@ -66,6 +98,11 @@
     <div class="status">
         <p id="message">正在准备导入...</p>
         <p id="status"></p>
+        <!-- 添加时间显示 -->
+        <div class="time-info">
+            <p>开始时间: <span id="startTime">-</span></p>
+            <p>结束时间: <span id="endTime">-</span></p>
+        </div>
     </div>
     <div>
         <button id="stopButton" class="button button-red" onclick="stopImport()">停止导入</button>
@@ -84,6 +121,9 @@
 
         const loadingIndicators = ["|", "/", "-", "\\"];
         let indicatorIndex = 0;
+        
+        // 记录开始时间
+        document.getElementById('startTime').textContent = new Date().toLocaleString();
         
         function updateProgress() {
             fetch('/progress_data')
@@ -123,6 +163,13 @@
                     if (pollCount > 20 && currentProgress === 0) {
                         document.getElementById('status').innerText = "导入可能已完成，但进度未更新。请返回首页查看结果。";
                         stopButton.disabled = true;
+                    }
+                    
+                    // 如果导入完成或停止，更新结束时间
+                    if (data.percentage === 100 || 
+                        data.status === '导入失败' || 
+                        data.status === '已停止') {
+                        document.getElementById('endTime').textContent = new Date().toLocaleString();
                     }
                 })
                 .catch(error => {

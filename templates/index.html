@@ -79,5 +79,16 @@
             <a href="/refresh" class="button reset">刷新文件列表</a>
         </div>
     </form>
+
+
+
+    <!-- 添加JavaScript代码 -->
+    <script>
+        document.querySelector('form').addEventListener('submit', function() {
+            const now = new Date();
+            document.getElementById('start-time').textContent = now.toLocaleString();
+            document.getElementById('end-time').textContent = '-';
+        });
+    </script>
 </body>
 </html>

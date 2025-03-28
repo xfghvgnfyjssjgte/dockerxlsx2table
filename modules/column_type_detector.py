@@ -3,56 +3,68 @@ import re
 
 def determine_column_type(column_values):
     """根据列数据推断数据类型，并处理过长的 VARCHAR 列"""
-    original_values = column_values.astype(str).str.strip()  # 保留原始值用于空值检测
+    original_values = column_values.astype(str).str.strip()
     filtered_values = original_values[original_values != ""]
     
     if filtered_values.empty:
         return 'VARCHAR(100)'
     
-    # 新增：检查原始数据中是否存在空字符串
     has_empty = (original_values == '').any()
     
-    # 日期时间检测（保持不变）
-    for fmt in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S'):
+    # 扩展日期时间格式支持
+    DATE_FORMATS = (
+        '%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d',  # 标准日期格式
+        '%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M:%S',  # 标准日期时间
+        '%Y年%m月%d日', '%Y年%m月%d日 %H时%M分%S秒',  # 中文格式
+        '%d/%m/%Y', '%m/%d/%Y',  # 其他常见格式
+        '%Y%m%d'  # 紧凑格式
+    )
+    
+    for fmt in DATE_FORMATS:
         try:
-            pd.to_datetime(column_values, format=fmt, errors='raise')
-            return 'DATETIME' if ' ' in fmt else 'DATE'
+            pd.to_datetime(filtered_values, format=fmt, errors='raise')
+            return 'DATETIME' if any(x in fmt for x in ['%H', '%M', '%S', '时', '分', '秒']) else 'DATE'
         except Exception:
             continue
     
-    # 检查是否全是数字格式
-    numeric_values = filtered_values.str.replace(',', '', regex=True)
+    # 增强数字格式识别
+    # 预处理：移除千位分隔符和货币符号
+    numeric_values = filtered_values.str.replace(r'[,¥$€£]', '', regex=True)
+    
+    # 检查科学计数法
+    if numeric_values.str.match(r'^-?\d+\.?\d*[eE][+-]?\d+$').all():
+        return 'DOUBLE'
+    
+    # 检查整数（包括带分隔符的）
     if numeric_values.str.match(r'^-?\d+$').all():
-        # 检查数字长度，如果任何值超过10位，使用VARCHAR
         max_digits = numeric_values.str.len().max()
-        if max_digits > 10:  # INT最大为10位数字
-            return f'VARCHAR({max(max_digits + 5, 30)})'  # 确保足够长度
-        # 如果存在空字符串，使用VARCHAR
-        if (column_values == '').any():
+        if max_digits > 10 or has_empty:
             return f'VARCHAR({max(max_digits + 5, 30)})'
         return 'INT'
     
-    if numeric_values.str.match(r'^-?\d+(\.\d+)?$').all():
-        # 分析数值特征
+    # 检查小数（包括货币）
+    if numeric_values.str.match(r'^-?\d*\.?\d+$').all():
         max_decimal_length = 0
+        max_integer_length = 0
+        
         for val in numeric_values:
-            if '.' in str(val):
-                decimal_part = str(val).split('.')[1]
-                max_decimal_length = max(max_decimal_length, len(decimal_part))
+            parts = str(val).split('.')
+            max_integer_length = max(max_integer_length, len(parts[0].replace('-', '')))
+            if len(parts) > 1:
+                max_decimal_length = max(max_decimal_length, len(parts[1]))
         
-        # 如果存在空字符串，使用VARCHAR
-        if (column_values == '').any():
-            return f'VARCHAR({max(numeric_values.str.len().max() + 5, 30)})'
+        if has_empty:
+            total_length = max_integer_length + (max_decimal_length > 0 and max_decimal_length + 1 or 0)
+            return f'VARCHAR({max(total_length + 5, 30)})'
         
-        # 如果小数位数大于6位，使用DOUBLE
-        # 否则使用DECIMAL以保证精确性
-        if max_decimal_length > 6:
+        if max_decimal_length > 6 or max_integer_length > 12:
             return 'DOUBLE'
         else:
-            return f'DECIMAL({min(18, max_decimal_length + 12)},{min(max_decimal_length, 6)})'
-    # 删除这里的多余return语句
+            precision = min(max_integer_length + max_decimal_length, 18)
+            scale = min(max_decimal_length, 6)
+            return f'DECIMAL({precision},{scale})'
     
-    # 如果类型混合或无法判断，fallback 到 VARCHAR
+    # VARCHAR和TEXT的处理逻辑保持不变
     max_length = column_values.str.len().max()
     if max_length <= 50:
         return f'VARCHAR({max_length + 10})'  # 给一点余量
